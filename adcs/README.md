@@ -48,7 +48,7 @@ BASE_API_KEY=your_basescan_api_key
   - Explorer: https://arbiscan.io
 
   - Coordinator address: 0x07811b8B6151db734b8D1568918d3A62607879a7
-
+- **Base**
   - ChainID: 8453
   - Explorer: https://basescan.org
 
