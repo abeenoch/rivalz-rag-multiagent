@@ -23,12 +23,6 @@ KNOWLEDGE_BASE_ID = None
 RAG_DOCUMENTS = []
 
 def setup_rag_pipeline():
-    """
-    Set up the RAG pipeline following the exact flow of the sample script.
-    
-    Returns:
-        str: The ID of the created knowledge base
-    """
     global KNOWLEDGE_BASE_ID, RAG_DOCUMENTS
     
     # Initialize the client
@@ -74,18 +68,25 @@ def setup_rag_pipeline():
                 RAG_DOCUMENTS.append(document["id"])
                 print(f"✅ Document added: {document['id']}")
 
-            # Wait for knowledge base to be ready
+            # Wait for knowledge base to be ready with a timeout
+            timeout_duration = 60  # 1 minute timeout
+            start_time = time.time()
+
             response = client.get_knowledge_bases()
             while response[0]["status"] != "ready":
+                if time.time() - start_time > timeout_duration:
+                    print("⚠️ Timeout reached: Knowledge base not ready after 60 seconds. Proceeding...")
+                    break
                 response = client.get_knowledge_bases()
                 time.sleep(1)
 
-            print("✅ RAG Pipeline Setup Complete")
+            print("✅ RAG Pipeline Setup Complete (with or without timeout)")
             return KNOWLEDGE_BASE_ID
 
     except Exception as error:
         print("❌ RAG Setup Error:", str(error))
         return None
+
 
 
 
