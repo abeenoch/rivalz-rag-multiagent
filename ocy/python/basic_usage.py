@@ -34,7 +34,7 @@ def main():
         print("\n📚 Creating knowledge base...")
         knowledge_base = client.create_rag_knowledge_base(
             CURRENT_DIR / "../documents/knowledge.pdf",
-            "My Knowledge Base"
+            "My Base"
         )
         print("✅ Knowledge base created:", knowledge_base["id"])
 
