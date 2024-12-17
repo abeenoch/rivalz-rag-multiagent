@@ -5,11 +5,15 @@ import time
 from pathlib import Path
 from rivalz_client_sdk import RivalzClientSdk
 import os
-_ = load_dotenv()
-
 from agent import Agent, Swarm
 from langchain_community.tools import DuckDuckGoSearchResults
+import logging 
 
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.getLogger().setLevel(logging.INFO)
+
+_ = load_dotenv()
 
 # Initialize Swarm with telemetry
 client = Swarm()
@@ -247,73 +251,48 @@ def monitor_tvl_changes(retries: int = 3):
 
     raise RuntimeError("Failed to fetch TVL for all chains after multiple attempts")
 
-COIN_SYMBOL_TO_ID = {
+
+import requests
+
+import requests
+
+# Static mapping of symbols to CoinGecko IDs
+SYMBOL_TO_ID = {
     "BTC": "bitcoin",
     "ETH": "ethereum",
-    "DOGE": "dogecoin",
     "BNB": "binancecoin",
+    "DOGE": "dogecoin",
+    "XRP": "ripple",
     "ADA": "cardano",
     "SOL": "solana",
-    "XRP": "ripple",
-    "LTC": "litecoin",
-    "DOT": "polkadot",
     "MATIC": "polygon",
-    "SHIB": "shiba-inu",
+    "DOT": "polkadot",
+    "SHIB": "shiba-inu"
 }
-
-COIN_LIST_CACHE = {}
-
-def fetch_coin_list() -> dict:
-    """
-    Fetches all CoinGecko coin IDs and symbols.
-
-    Returns:
-    - dict: A dictionary mapping coin symbols to their CoinGecko IDs.
-    """
-    global COIN_LIST_CACHE
-
-    if COIN_LIST_CACHE:  # Use cached list if available
-        return COIN_LIST_CACHE
-
-    url = "https://api.coingecko.com/api/v3/coins/list"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        coins = response.json()
-        # Map symbols (uppercase) to their IDs
-        COIN_LIST_CACHE = {coin['symbol'].upper(): coin['id'] for coin in coins}
-        return COIN_LIST_CACHE
-    except requests.RequestException as e:
-        print(f"Error fetching coin list: {e}")
-        return {}
 
 def crypto_price(query: str) -> dict:
     """
-    Fetch current cryptocurrency prices.
+    Fetch current cryptocurrency prices directly for a single coin.
 
     Parameters:
-    - query (str): The cryptocurrency name or symbol (e.g., BTC, ETH, Bitcoin).
+    - query (str): The cryptocurrency name or symbol (e.g., BTC, ETH, bitcoin).
 
     Returns:
     - dict: A dictionary containing the current price in USD or an error message.
     """
+    query_upper = query.upper()
+    
+    # Use static mapping if available
+    coin_id = SYMBOL_TO_ID.get(query_upper)
+    if not coin_id:  # Fallback to user query as lowercase
+        coin_id = query.lower()
+
+    # Directly query the price for a specific coin ID
     url = "https://api.coingecko.com/api/v3/simple/price"
-
-    # Step 1: Check static mapping first
-    coin_id = COIN_SYMBOL_TO_ID.get(query.upper())
-
-    # Step 2: If not in static mapping, fetch the coin list dynamically
-    if not coin_id:
-        print("Fetching coin list dynamically...")
-        coin_list = fetch_coin_list()
-        coin_id = coin_list.get(query.upper())
-
-    # Step 3: If coin ID is still not found, return an error
-    if not coin_id:
-        return {"message": f"Unable to find the coin '{query}'. Please check the name or symbol."}
-
-    # Step 4: Query the CoinGecko API for the coin price
-    params = {"ids": coin_id, "vs_currencies": "usd"}
+    params = {
+        "ids": coin_id,       # Use the coin ID
+        "vs_currencies": "usd"
+    }
 
     try:
         response = requests.get(url, params=params, timeout=10)
@@ -323,13 +302,15 @@ def crypto_price(query: str) -> dict:
         # Check if valid price data exists
         if coin_id in data and "usd" in data[coin_id]:
             price = data[coin_id]["usd"]
-            return {"message": f"The current price of {query.upper()} is ${price:.2f} USD."}
+            return {"message": f"The current price of {query_upper} is ${price:.2f} USD."}
         else:
             return {"message": f"Unable to retrieve the price for '{query}'."}
     except requests.RequestException as e:
         return {"error": "Network Error", "message": str(e)}
     except KeyError:
         return {"error": "Data Error", "message": f"Invalid response for query: {query}"}
+
+
 
 
 
@@ -362,7 +343,7 @@ onchain_operations_agent = Agent(
 financial_analyst_agent = Agent(
     name="Financial Analyst Agent",
     instructions="Analyze and monitor financial data, crypto price including TVL changes and network activity in the blockchain ecosystem.",
-    functions=[monitor_tvl_changes, crypto_price, query_rag_knowledge_base, fetch_coin_list]
+    functions=[monitor_tvl_changes, crypto_price, query_rag_knowledge_base]
 )
 
 # Define transfer functions
