@@ -248,18 +248,44 @@ def monitor_tvl_changes(retries: int = 3):
     raise RuntimeError("Failed to fetch TVL for all chains after multiple attempts")
 
 COIN_SYMBOL_TO_ID = {
-    "BTC" : "bitcoin",
-    "ETH" : "ethereum",
-    "DOGE" : "dogecoin",
-    "BNB" : "binancecoin",
-    "ADA" : "cardano",
-    "SOL" : "solana",
-    "XRP" : "ripple",
-    "LTC" : "litecoin",
-    "DOT" : "polkadot",
-    "MATIC" : "polygon",
-    "SHIB" : "shiba-inu",
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "DOGE": "dogecoin",
+    "BNB": "binancecoin",
+    "ADA": "cardano",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "LTC": "litecoin",
+    "DOT": "polkadot",
+    "MATIC": "polygon",
+    "SHIB": "shiba-inu",
 }
+
+COIN_LIST_CACHE = {}
+
+def fetch_coin_list() -> dict:
+    """
+    Fetches all CoinGecko coin IDs and symbols.
+
+    Returns:
+    - dict: A dictionary mapping coin symbols to their CoinGecko IDs.
+    """
+    global COIN_LIST_CACHE
+
+    if COIN_LIST_CACHE:  # Use cached list if available
+        return COIN_LIST_CACHE
+
+    url = "https://api.coingecko.com/api/v3/coins/list"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        coins = response.json()
+        # Map symbols (uppercase) to their IDs
+        COIN_LIST_CACHE = {coin['symbol'].upper(): coin['id'] for coin in coins}
+        return COIN_LIST_CACHE
+    except requests.RequestException as e:
+        print(f"Error fetching coin list: {e}")
+        return {}
 
 def crypto_price(query: str) -> dict:
     """
@@ -272,8 +298,21 @@ def crypto_price(query: str) -> dict:
     - dict: A dictionary containing the current price in USD or an error message.
     """
     url = "https://api.coingecko.com/api/v3/simple/price"
-    coin_id = COIN_SYMBOL_TO_ID.get(query.upper(), query.lower())
-    
+
+    # Step 1: Check static mapping first
+    coin_id = COIN_SYMBOL_TO_ID.get(query.upper())
+
+    # Step 2: If not in static mapping, fetch the coin list dynamically
+    if not coin_id:
+        print("Fetching coin list dynamically...")
+        coin_list = fetch_coin_list()
+        coin_id = coin_list.get(query.upper())
+
+    # Step 3: If coin ID is still not found, return an error
+    if not coin_id:
+        return {"message": f"Unable to find the coin '{query}'. Please check the name or symbol."}
+
+    # Step 4: Query the CoinGecko API for the coin price
     params = {"ids": coin_id, "vs_currencies": "usd"}
 
     try:
@@ -281,12 +320,12 @@ def crypto_price(query: str) -> dict:
         response.raise_for_status()
         data = response.json()
 
-         # Check if valid price data exists
-        if coin_id in data:
+        # Check if valid price data exists
+        if coin_id in data and "usd" in data[coin_id]:
             price = data[coin_id]["usd"]
             return {"message": f"The current price of {query.upper()} is ${price:.2f} USD."}
         else:
-            return {"message": f"Unable to retrieve the price for '{query}'. Check the cryptocurrency name or symbol."}
+            return {"message": f"Unable to retrieve the price for '{query}'."}
     except requests.RequestException as e:
         return {"error": "Network Error", "message": str(e)}
     except KeyError:
@@ -323,7 +362,7 @@ onchain_operations_agent = Agent(
 financial_analyst_agent = Agent(
     name="Financial Analyst Agent",
     instructions="Analyze and monitor financial data, crypto price including TVL changes and network activity in the blockchain ecosystem.",
-    functions=[monitor_tvl_changes, crypto_price, query_rag_knowledge_base]
+    functions=[monitor_tvl_changes, crypto_price, query_rag_knowledge_base, fetch_coin_list]
 )
 
 # Define transfer functions
