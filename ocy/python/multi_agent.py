@@ -11,7 +11,7 @@ from agent import Agent, Swarm
 from langchain_community.tools import DuckDuckGoSearchResults
 
 
-# Initialize Swarm with telemetry (for Rivalz AI Network)
+# Initialize Swarm with telemetry
 client = Swarm()
 
 # Initialize Rivalz Client for RAG operations
@@ -23,6 +23,7 @@ KNOWLEDGE_BASE_ID = None
 RAG_DOCUMENTS = []
 
 def setup_rag_pipeline():
+    
     global KNOWLEDGE_BASE_ID, RAG_DOCUMENTS
     
     # Initialize the client
@@ -246,6 +247,19 @@ def monitor_tvl_changes(retries: int = 3):
 
     raise RuntimeError("Failed to fetch TVL for all chains after multiple attempts")
 
+COIN_SYMBOL_TO_ID = {
+    "BTC" : "bitcoin",
+    "ETH" : "ethereum",
+    "DOGE" : "dogecoin",
+    "BNB" : "binancecoin",
+    "ADA" : "cardano",
+    "SOL" : "solana",
+    "XRP" : "ripple",
+    "LTC" : "litecoin",
+    "DOT" : "polkadot",
+    "MATIC" : "polygon",
+    "SHIB" : "shiba-inu",
+}
 
 def crypto_price(query: str) -> dict:
     """
@@ -257,18 +271,19 @@ def crypto_price(query: str) -> dict:
     Returns:
     - dict: A dictionary containing the current price in USD or an error message.
     """
-    # Use CoinGecko's simple/price endpoint
     url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {"ids": query.lower(), "vs_currencies": "usd"}
+    coin_id = COIN_SYMBOL_TO_ID.get(query.upper(), query.lower())
+    
+    params = {"ids": coin_id, "vs_currencies": "usd"}
 
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-
-        # Check if the response contains valid data
         data = response.json()
-        if query.lower() in data:
-            price = data[query.lower()]["usd"]
+
+         # Check if valid price data exists
+        if coin_id in data:
+            price = data[coin_id]["usd"]
             return {"message": f"The current price of {query.upper()} is ${price:.2f} USD."}
         else:
             return {"message": f"Unable to retrieve the price for '{query}'. Check the cryptocurrency name or symbol."}
@@ -296,7 +311,7 @@ triage_agent = Agent(
     - For token transfers, staking and on-chain operations -> On-Chain Operations Agent
     - For TVL monitoring, crypto price and financial analysis -> Financial Analyst Agent
     In specific cases - always transfer to the appropriate specialist.""",
-    functions=[rivalz_network_info, create_rag_knowledge_base,query_rag_knowledge_base]  # <-- COMMA ADDED HERE
+    functions=[rivalz_network_info, create_rag_knowledge_base,query_rag_knowledge_base]
 )
 
 onchain_operations_agent = Agent(
