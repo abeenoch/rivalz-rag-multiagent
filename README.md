@@ -28,21 +28,4 @@ The system leverages a RAG pipeline and three agents to handle tasks like:
 - **DUCKDUCKGO**: Used this for internet search.
 - **FASTAPI**: Used this for backend.
 
-## Installation
-
-### Prerequisites
-- Python 3.8+
-- `pip` for dependency management
-
-### Steps
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/your-repo-name.git
-   cd your-repo-name
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-
-python multi_agent_example.py
-
 
