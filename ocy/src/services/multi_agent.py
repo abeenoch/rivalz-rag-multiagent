@@ -1,17 +1,19 @@
 from dotenv import load_dotenv
 import logging
+import asyncio
 import requests
+import json
 import time
 from pathlib import Path
-from rivalz_client_sdk import RivalzClientSdk
+from src.rivalz_client_sdk import RivalzClientSdk
 import os
 _ = load_dotenv()
 
-from agent import Agent, Swarm
+from src.services.agent import Agent, Swarm
 from langchain_community.tools import DuckDuckGoSearchResults
 
 
-# Initialize Swarm with telemetry
+# Initialize Swarm with telemetry (for Rivalz AI Network)
 client = Swarm()
 
 # Initialize Rivalz Client for RAG operations
@@ -22,8 +24,7 @@ rivalz_client = RivalzClientSdk(os.getenv("RIVALZ_SECRET_TOKEN"))
 KNOWLEDGE_BASE_ID = None
 RAG_DOCUMENTS = []
 
-def setup_rag_pipeline():
-    
+async def setup_rag_pipeline():
     global KNOWLEDGE_BASE_ID, RAG_DOCUMENTS
     
     # Initialize the client
@@ -34,37 +35,36 @@ def setup_rag_pipeline():
         # Upload files
         print("📁 Uploading files...")
         upload_results = []
-        
+
         # Dynamically find and upload PDF files from a documents directory
         documents_dir = CURRENT_DIR / "../documents"
+        pdf_files = []
         if documents_dir.exists():
             pdf_files = list(documents_dir.glob("*.pdf"))
             for pdf_file in pdf_files:
-                upload_result = client.upload_file(pdf_file)
+                upload_result = await asyncio.to_thread(client.upload_file, pdf_file)
                 upload_results.append(upload_result)
                 print(f"✅ File uploaded successfully: {pdf_file.name}")
         
         # Upload other file types if needed (e.g., passport)
         passport_path = documents_dir / "passport.jpg"
         if passport_path.exists():
-            passport_result = client.upload_passport(passport_path)
+            passport_result = await asyncio.to_thread(client.upload_passport, passport_path)
             print("✅ Passport uploaded successfully")
 
         # Create knowledge base (use the first PDF found)
         if pdf_files:
             print("\n📚 Creating knowledge base...")
-            knowledge_base = client.create_rag_knowledge_base(
-                pdf_files[0],
-                "Multi-Agent RAG Knowledge Base"
+            knowledge_base = await asyncio.to_thread(
+                client.create_rag_knowledge_base, pdf_files[0], "Multi-Agent RAG Knowledge Base"
             )
             KNOWLEDGE_BASE_ID = knowledge_base["id"]
             print("✅ Knowledge base created:", KNOWLEDGE_BASE_ID)
 
             # Add additional documents to knowledge base
             for doc in pdf_files[1:]:
-                document = client.add_document_to_knowledge_base(
-                    doc,
-                    KNOWLEDGE_BASE_ID
+                document = await asyncio.to_thread(
+                    client.add_document_to_knowledge_base, doc, KNOWLEDGE_BASE_ID
                 )
                 RAG_DOCUMENTS.append(document["id"])
                 print(f"✅ Document added: {document['id']}")
@@ -73,13 +73,14 @@ def setup_rag_pipeline():
             timeout_duration = 60  # 1 minute timeout
             start_time = time.time()
 
-            response = client.get_knowledge_bases()
-            while response[0]["status"] != "ready":
+            while True:
+                response = await asyncio.to_thread(client.get_knowledge_bases)
+                if response[0]["status"] == "ready":
+                    break
                 if time.time() - start_time > timeout_duration:
                     print("⚠️ Timeout reached: Knowledge base not ready after 60 seconds. Proceeding...")
                     break
-                response = client.get_knowledge_bases()
-                time.sleep(1)
+                await asyncio.sleep(1)
 
             print("✅ RAG Pipeline Setup Complete (with or without timeout)")
             return KNOWLEDGE_BASE_ID
@@ -87,10 +88,7 @@ def setup_rag_pipeline():
     except Exception as error:
         print("❌ RAG Setup Error:", str(error))
         return None
-
-
-
-
+ 
 
 def create_rag_knowledge_base(document_path, knowledge_base_name):
     """
@@ -149,14 +147,6 @@ def query_rag_knowledge_base(query):
             "status": "error", 
             "message": f"RAG query failed: {str(e)}"
         }
-
-
-
-
-from langchain_community.tools import DuckDuckGoSearchResults
-
-import json
-from langchain_community.tools import DuckDuckGoSearchResults
 
 def rivalz_network_info(query: str) -> dict:
     """
@@ -218,8 +208,6 @@ def rivalz_network_info(query: str) -> dict:
 
 
 
-
-
 def monitor_tvl_changes(retries: int = 3):
     """
     Fetch the Total Value Locked (TVL) for all chains using DeFiLlama's /v2/chains endpoint.
@@ -247,46 +235,57 @@ def monitor_tvl_changes(retries: int = 3):
 
     raise RuntimeError("Failed to fetch TVL for all chains after multiple attempts")
 
-COIN_SYMBOL_TO_ID = {
-    "BTC" : "bitcoin",
-    "ETH" : "ethereum",
-    "DOGE" : "dogecoin",
-    "BNB" : "binancecoin",
-    "ADA" : "cardano",
-    "SOL" : "solana",
-    "XRP" : "ripple",
-    "LTC" : "litecoin",
-    "DOT" : "polkadot",
-    "MATIC" : "polygon",
-    "SHIB" : "shiba-inu",
+
+
+# Static mapping of symbols to CoinGecko IDs
+SYMBOL_TO_ID = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "BNB": "binancecoin",
+    "DOGE": "dogecoin",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "SOL": "solana",
+    "MATIC": "polygon",
+    "DOT": "polkadot",
+    "SHIB": "shiba-inu"
 }
 
 def crypto_price(query: str) -> dict:
     """
-    Fetch current cryptocurrency prices.
+    Fetch current cryptocurrency prices directly for a single coin.
 
     Parameters:
-    - query (str): The cryptocurrency name or symbol (e.g., BTC, ETH, Bitcoin).
+    - query (str): The cryptocurrency name or symbol (e.g., BTC, ETH, bitcoin).
 
     Returns:
     - dict: A dictionary containing the current price in USD or an error message.
     """
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    coin_id = COIN_SYMBOL_TO_ID.get(query.upper(), query.lower())
+    query_upper = query.upper()
     
-    params = {"ids": coin_id, "vs_currencies": "usd"}
+    # Use static mapping if available
+    coin_id = SYMBOL_TO_ID.get(query_upper)
+    if not coin_id:  # Fallback to user query as lowercase
+        coin_id = query.lower()
+
+    # Directly query the price for a specific coin ID
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    params = {
+        "ids": coin_id,       # Use the coin ID
+        "vs_currencies": "usd"
+    }
 
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
-         # Check if valid price data exists
-        if coin_id in data:
+        # Check if valid price data exists
+        if coin_id in data and "usd" in data[coin_id]:
             price = data[coin_id]["usd"]
-            return {"message": f"The current price of {query.upper()} is ${price:.2f} USD."}
+            return {"message": f"The current price of {query_upper} is ${price:.2f} USD."}
         else:
-            return {"message": f"Unable to retrieve the price for '{query}'. Check the cryptocurrency name or symbol."}
+            return {"message": f"Unable to retrieve the price for '{query}'."}
     except requests.RequestException as e:
         return {"error": "Network Error", "message": str(e)}
     except KeyError:
@@ -311,7 +310,7 @@ triage_agent = Agent(
     - For token transfers, staking and on-chain operations -> On-Chain Operations Agent
     - For TVL monitoring, crypto price and financial analysis -> Financial Analyst Agent
     In specific cases - always transfer to the appropriate specialist.""",
-    functions=[rivalz_network_info, create_rag_knowledge_base,query_rag_knowledge_base]
+    functions=[rivalz_network_info, create_rag_knowledge_base,query_rag_knowledge_base]  # <-- COMMA ADDED HERE
 )
 
 onchain_operations_agent = Agent(
@@ -346,6 +345,31 @@ financial_analyst_agent.functions.append(transfer_back_to_triage)
 
 print("Starting Rivalz AI Agents - Triage, On-Chain Operations, and Financial Analyst Agents")
 
+
+
+async def call_multi_agent(user_input: str):
+    messages = [{"role": "user", "content": user_input}]
+    agent = triage_agent
+
+    # Await the client.run method
+    response = await client.run(agent=agent, messages=messages)
+
+    # Update messages and agent after response
+    messages.extend(response.messages)
+    agent = response.agent
+
+    # Process messages from the response
+    for message in response.messages:
+        if message["role"] == "assistant" and message.get("content"):
+            return f"\033[94m{message['sender']}\033[0m: {message['content']}"
+        elif message["role"] == "tool":
+            tool_name = message.get("tool_name", "")
+            return f"\033[93mSystem\033[0m: {message['content']}"
+
+
+
+    
+# To run in the termainal locally
 def main():
     # First, set up the RAG pipeline
     setup_rag_pipeline()

@@ -131,37 +131,41 @@ class Result(BaseModel):
     agent: Optional[Agent] = None # The agent instance, if applicable.
 
 
+import asyncio
+import copy
+import json
+from typing import List
+
 class Swarm:
     # Implements the core logic of orchestrating a single/multi-agent system
-    def __init__(
-        self,
-        client=None,
-    ):
+    def __init__(self, client=None):
         if not client:
-            client = OpenAI()
+            client = OpenAI()  # Assuming OpenAI is async-compatible
         self.client = client
-        
-    def get_chat_completion(
-        self,
-        agent: Agent,
-        history: List,
-        model_override: str
-    ):
-        messages = [{"role": "system", "content": agent.instructions}] + history
-        tools = [function_to_json(f) for f in agent.functions]
-        
-        create_params = {
-            "model": model_override or agent.model,
-            "messages": messages,
-            "tools": tools or None,
-            "tool_choice": agent.tool_choice,
-        }
-        
-        if tools:
-            create_params["parallel_tool_calls"] = agent.parallel_tool_calls
-        
-        return self.client.chat.completions.create(**create_params)
+
+    async def get_chat_completion(
+            self,
+            agent: Agent,
+            history: List,
+            model_override: str
+        ):
+            messages = [{"role": "system", "content": agent.instructions}] + history
+            tools = [function_to_json(f) for f in agent.functions]
             
+            create_params = {
+                "model": model_override or agent.model,
+                "messages": messages,
+                "tools": tools or None,
+                "tool_choice": agent.tool_choice,
+            }
+            
+            if tools:
+                create_params["parallel_tool_calls"] = agent.parallel_tool_calls
+
+            # Wrap the synchronous API call with asyncio.to_thread
+            return await asyncio.to_thread(self.client.chat.completions.create, **create_params)
+
+
     def handle_function_result(self, result) -> Result:
         match result:
             case Result() as result:
@@ -177,16 +181,17 @@ class Swarm:
                 except Exception as e:
                     raise TypeError(e)
 
-    def handle_tool_calls(
+    async def handle_tool_calls(
         self,
         tool_calls: List[ChatCompletionMessageToolCall],
         functions: List[AgentFunction]
     ) -> Response:
         function_map = {f.__name__: f for f in functions}
         partial_response = Response(messages=[], agent=None)
+
         for tool_call in tool_calls:
             name = tool_call.function.name
-            # handle missing tool case, skip to next tool
+            # Handle missing tool case, skip to the next tool
             if name not in function_map:
                 partial_response.messages.append(
                     {
@@ -198,9 +203,17 @@ class Swarm:
                 )
                 continue
             args = json.loads(tool_call.function.arguments)
-            raw_result = function_map[name](**args)
+
+            # Support async tools
+            func = function_map[name]
+            if asyncio.iscoroutinefunction(func):
+                raw_result = await func(**args)
+            else:
+                raw_result = func(**args)
+
             print(f'Called function {name} with args: {args} and obtained result: {raw_result}')
             print('#############################################')
+
             result: Result = self.handle_function_result(raw_result)
             partial_response.messages.append(
                 {
@@ -214,8 +227,8 @@ class Swarm:
                 partial_response.agent = result.agent
 
         return partial_response
-    
-    def run(
+
+    async def run(
         self,
         agent: Agent,
         messages: List,
@@ -230,8 +243,10 @@ class Swarm:
         print('#############################################')
         print(f'history: {history}')
         print('#############################################')
+
         while len(history) - init_len < max_turns and active_agent:
-            completion = self.get_chat_completion(
+            # Await chat completion
+            completion = await self.get_chat_completion(
                 agent=active_agent,
                 history=history,
                 model_override=model_override
@@ -241,22 +256,154 @@ class Swarm:
             print(f'Active agent: {active_agent.name}')
             print(f"message: {message}")
             print('#############################################')
-            
-            
+
             history.append(json.loads(message.model_dump_json()))
 
             if not message.tool_calls or not execute_tools:
                 print('No tool calls hence breaking')
                 print('#############################################')
                 break
-            
-            partial_response = self.handle_tool_calls(message.tool_calls, active_agent.functions)
+
+            # Await tool call handling
+            partial_response = await self.handle_tool_calls(message.tool_calls, active_agent.functions)
             history.extend(partial_response.messages)
-            
+
             if partial_response.agent:
                 active_agent = partial_response.agent
                 message.sender = active_agent.name
+            
         return Response(
             messages=history[init_len:],
             agent=active_agent,
         )
+
+
+# class Swarm:
+#     # Implements the core logic of orchestrating a single/multi-agent system
+#     def __init__(
+#         self,
+#         client=None,
+#     ):
+#         if not client:
+#             client = OpenAI()
+#         self.client = client
+        
+#     def get_chat_completion(
+#         self,
+#         agent: Agent,
+#         history: List,
+#         model_override: str
+#     ):
+#         messages = [{"role": "system", "content": agent.instructions}] + history
+#         tools = [function_to_json(f) for f in agent.functions]
+        
+#         create_params = {
+#             "model": model_override or agent.model,
+#             "messages": messages,
+#             "tools": tools or None,
+#             "tool_choice": agent.tool_choice,
+#         }
+        
+#         if tools:
+#             create_params["parallel_tool_calls"] = agent.parallel_tool_calls
+        
+#         return self.client.chat.completions.create(**create_params)
+            
+#     def handle_function_result(self, result) -> Result:
+#         match result:
+#             case Result() as result:
+#                 return result
+#             case Agent() as agent:
+#                 return Result(
+#                     value=json.dumps({"assistant": agent.name}),
+#                     agent=agent
+#                 )
+#             case _:
+#                 try:
+#                     return Result(value=str(result))
+#                 except Exception as e:
+#                     raise TypeError(e)
+
+#     def handle_tool_calls(
+#         self,
+#         tool_calls: List[ChatCompletionMessageToolCall],
+#         functions: List[AgentFunction]
+#     ) -> Response:
+#         function_map = {f.__name__: f for f in functions}
+#         partial_response = Response(messages=[], agent=None)
+#         for tool_call in tool_calls:
+#             name = tool_call.function.name
+#             # handle missing tool case, skip to next tool
+#             if name not in function_map:
+#                 partial_response.messages.append(
+#                     {
+#                         "role": "tool",
+#                         "tool_call_id": tool_call.id,
+#                         "tool_name": name,
+#                         "content": f"Error: Tool {name} not found.",
+#                     }
+#                 )
+#                 continue
+#             args = json.loads(tool_call.function.arguments)
+#             raw_result = function_map[name](**args)
+#             print(f'Called function {name} with args: {args} and obtained result: {raw_result}')
+#             print('#############################################')
+#             result: Result = self.handle_function_result(raw_result)
+#             partial_response.messages.append(
+#                 {
+#                     "role": "tool",
+#                     "tool_call_id": tool_call.id,
+#                     "tool_name": name,
+#                     "content": result.value,
+#                 }
+#             )
+#             if result.agent:
+#                 partial_response.agent = result.agent
+
+#         return partial_response
+    
+#     def run(
+#         self,
+#         agent: Agent,
+#         messages: List,
+#         model_override: str = None,
+#         max_turns: int = float("inf"),
+#         execute_tools: bool = True,
+#     ) -> Response:
+#         active_agent = agent
+#         history = copy.deepcopy(messages)
+#         init_len = len(messages)
+
+#         print('#############################################')
+#         print(f'history: {history}')
+#         print('#############################################')
+#         while len(history) - init_len < max_turns and active_agent:
+#             completion = self.get_chat_completion(
+#                 agent=active_agent,
+#                 history=history,
+#                 model_override=model_override
+#             )
+#             message = completion.choices[0].message
+#             message.sender = active_agent.name
+#             print(f'Active agent: {active_agent.name}')
+#             print(f"message: {message}")
+#             print('#############################################')
+            
+            
+#             history.append(json.loads(message.model_dump_json()))
+
+#             if not message.tool_calls or not execute_tools:
+#                 print('No tool calls hence breaking')
+#                 print('#############################################')
+#                 break
+            
+#             partial_response = self.handle_tool_calls(message.tool_calls, active_agent.functions)
+#             history.extend(partial_response.messages)
+            
+#             if partial_response.agent:
+#                 active_agent = partial_response.agent
+#                 message.sender = active_agent.name
+#         return Response(
+#             messages=history[init_len:],
+#             agent=active_agent,
+#         )
