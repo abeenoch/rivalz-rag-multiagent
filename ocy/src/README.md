@@ -3,11 +3,12 @@
 Simple Python wrapper for the Rivalz SDK with async/await support and file size validation.
 
 ## Setup
+0. cd ocy
 
-1. Install dependencies:
+1. create virtual environment
 
-```bash
-pip install rivalz-client python-dotenv
+```Terminal
+python -m venv env
 ```
 
 2. Create a `.env` file:
@@ -15,6 +16,20 @@ pip install rivalz-client python-dotenv
 ```env
 RIVALZ_SECRET_TOKEN=your_secret_token_here
 ```
+
+3. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+``` 
+
+4. Run the server
+
+```
+uvicorn src.main:app --reload
+```
+
+
 
 ## Usage
 
@@ -115,3 +130,14 @@ async def create_chat_session(
 ) -> Dict:
     ...
 ```
+
+
+
+
+
+
+
+
+
+
+
