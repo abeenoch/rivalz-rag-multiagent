@@ -1,0 +1,8 @@
+uvicorn
+fastapi
+openai
+python-dotenv
+requests
+langchain-community==0.3.7
+duckduckgo-search
+rivalz-client
