@@ -22,7 +22,7 @@ The system leverages a RAG pipeline and three agents to handle tasks like:
 - ***RAG-Pipeline**: For more accurate responses, used RIVALZ for vector storage.
 - **API**: Used FASTAPI for building the backend API that handles requests and serves data.
 
-#TOOLS
+## Tools
 - **OPENAI SWARM**: For multiagent orchestration.
 - **RIVALZ CLIENT**: For knowledge base creation vector storage and retrival.
 - **DUCKDUCKGO**: Used this for internet search.
